@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
 use nalgebra::Vector3;
+use rand::Rng;
 use std::{error::Error, io::Write};
 
 mod camera;
@@ -14,8 +15,9 @@ use ray::Ray;
 use sphere::Sphere;
 
 const ASPECT_RATIO: f64 = 16.0 / 9.0;
-const IMAGE_WIDTH: usize = 400;
+const IMAGE_WIDTH: usize = 1920 / 2 - 5;
 const IMAGE_HEIGHT: usize = (IMAGE_WIDTH as f64 / ASPECT_RATIO) as usize;
+const SAMPLES: usize = 20;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let sdl2_context = sdl2::init()?;
@@ -35,8 +37,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut events = sdl2_context.event_pump()?;
 
     let mut frame_buffer = FrameBuffer::new(IMAGE_WIDTH, IMAGE_HEIGHT);
+    let mut rng = rand::rngs::OsRng;
+    let spheres = [Sphere {
+        center: Vector3::new(0.0, 0.0, 0.0),
+        radius: 0.25,
+    }];
+    let camera = Camera::new(
+        Vector3::new(0.0, 0.5, -2.0),
+        ASPECT_RATIO,
+        1.0,
+        IMAGE_WIDTH as u64,
+    );
     draw_background(&mut frame_buffer);
-    draw_sphere(&mut frame_buffer)?;
+    draw_scene(
+        camera,
+        spheres.iter().copied(),
+        &mut frame_buffer,
+        SAMPLES,
+        &mut rng,
+    )?;
 
     texture.update(
         sdl2::rect::Rect::new(0, 0, IMAGE_WIDTH as u32, IMAGE_HEIGHT as u32),
@@ -57,22 +76,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn draw_sphere(frame_buffer: &mut FrameBuffer) -> Result<(), Box<dyn Error>> {
-    let camera = Camera::new(
-        Vector3::new(0.0, -0.6, 0.0),
-        ASPECT_RATIO,
-        1.0,
-        IMAGE_WIDTH as u64,
-    );
-    let sphere = Sphere {
-        center: Vector3::new(0.0, 0.0, -3.0),
-        radius: 0.5,
-    };
-    for x in 0..frame_buffer.width() {
+fn draw_scene(
+    camera: Camera,
+    spheres: impl Iterator<Item = Sphere>,
+    frame_buffer: &mut FrameBuffer,
+    samples: usize,
+    rng: &mut rand::rngs::OsRng,
+) -> Result<(), Box<dyn Error>> {
+    for sphere in spheres {
         for y in 0..frame_buffer.height() {
-            let ray = camera.cast(x as f64, y as f64);
-            if sphere.intersects(ray) {
-                frame_buffer.set_pixel(x, y, sdl2::pixels::Color::RGBA(20, 20, 127, 0));
+            for x in 0..frame_buffer.width() {
+                let color = std::iter::repeat_with(|| camera.cast(x as f64, y as f64, rng.gen()))
+                    .map(|ray| {
+                        if sphere.intersects(ray) {
+                            Vector3::new(0.5, 0.5, 1.0)
+                        } else {
+                            frame_buffer.get_pixel(x, y)
+                        }
+                    })
+                    .take(samples)
+                    .reduce(|acc, e| acc + e)
+                    .unwrap()
+                    / SAMPLES as f64;
+                frame_buffer.set_pixel(x, y, color);
             }
         }
     }

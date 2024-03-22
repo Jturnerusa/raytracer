@@ -49,11 +49,14 @@ impl Camera {
         }
     }
 
-    pub fn cast(&self, x: f64, y: f64) -> Ray {
+    pub fn cast(&self, x: f64, y: f64, r: f64) -> Ray {
+        let px = -0.5 + r;
+        let py = -0.5 + r;
         let pixel_center = self.pixel_0 + (x * self.pixel_delta_u) + (y * self.pixel_delta_v);
-        let direction = pixel_center - self.center;
+        let pixel_sampled = pixel_center + (self.pixel_delta_u * px) + (self.pixel_delta_v * py);
+        let direction = pixel_sampled - self.center;
         Ray {
-            origin: pixel_center,
+            origin: pixel_sampled,
             direction,
         }
     }
