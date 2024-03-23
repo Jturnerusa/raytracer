@@ -1,9 +1,4 @@
 #![allow(dead_code, unused_imports)]
-
-use nalgebra::Vector3;
-use rand::Rng;
-use std::{error::Error, io::Write};
-
 mod camera;
 mod frame;
 mod ray;
@@ -11,8 +6,11 @@ mod sphere;
 
 use camera::Camera;
 use frame::FrameBuffer;
+use nalgebra::Vector3;
+use rand::Rng;
 use ray::Ray;
 use sphere::Sphere;
+use std::error::Error;
 use std::io::{self, Write};
 
 const ASPECT_RATIO: f64 = 16.0 / 9.0;
