@@ -5,16 +5,6 @@ pub trait Rgba32 {
     fn from_rgba32(rgba: (u8, u8, u8, u8)) -> Self;
 }
 
-impl Rgba32 for sdl2::pixels::Color {
-    fn to_rgba32(&self) -> (u8, u8, u8, u8) {
-        (self.r, self.g, self.b, self.a)
-    }
-
-    fn from_rgba32((r, g, b, a): (u8, u8, u8, u8)) -> Self {
-        Self::RGBA(r, g, b, a)
-    }
-}
-
 impl Rgba32 for nalgebra::Vector3<f64> {
     fn to_rgba32(&self) -> (u8, u8, u8, u8) {
         (

@@ -5,5 +5,4 @@ edition = "2021"
 
 [dependencies]
 nalgebra = "0.32.4"
-sdl2 = "0.36.0"
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"]}

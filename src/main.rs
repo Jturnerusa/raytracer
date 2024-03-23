@@ -83,13 +83,7 @@ fn draw_background(frame_buffer: &mut FrameBuffer) {
     for y in 0..frame_buffer.height() {
         for x in 0..frame_buffer.width() {
             let a = y as f64 / IMAGE_HEIGHT as f64;
-            let lerp = (1.0 - a) * blue + a * white;
-            let color = sdl2::pixels::Color::RGBA(
-                (lerp.x * 255.0) as u8,
-                (lerp.y * 255.0) as u8,
-                (lerp.z * 255.0) as u8,
-                0,
-            );
+            let color = (1.0 - a) * blue + a * white;
             frame_buffer.set_pixel(x, y, color);
         }
     }
