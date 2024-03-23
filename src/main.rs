@@ -13,6 +13,7 @@ use camera::Camera;
 use frame::FrameBuffer;
 use ray::Ray;
 use sphere::Sphere;
+use std::io::{self, Write};
 
 const ASPECT_RATIO: f64 = 16.0 / 9.0;
 const IMAGE_WIDTH: usize = 1920 / 2 - 5;
@@ -20,22 +21,6 @@ const IMAGE_HEIGHT: usize = (IMAGE_WIDTH as f64 / ASPECT_RATIO) as usize;
 const SAMPLES: usize = 20;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let sdl2_context = sdl2::init()?;
-    let mut canvas = sdl2_context
-        .video()?
-        .window("raytracer", IMAGE_WIDTH as u32, IMAGE_HEIGHT as u32)
-        .position_centered()
-        .build()?
-        .into_canvas()
-        .build()?;
-    let texture_creator = canvas.texture_creator();
-    let mut texture = texture_creator.create_texture_streaming(
-        sdl2::pixels::PixelFormatEnum::RGBA32,
-        IMAGE_WIDTH as u32,
-        IMAGE_HEIGHT as u32,
-    )?;
-    let mut events = sdl2_context.event_pump()?;
-
     let mut frame_buffer = FrameBuffer::new(IMAGE_WIDTH, IMAGE_HEIGHT);
     let mut rng = rand::rngs::OsRng;
     let spheres = [Sphere {
@@ -56,23 +41,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         SAMPLES,
         &mut rng,
     )?;
-
-    texture.update(
-        sdl2::rect::Rect::new(0, 0, IMAGE_WIDTH as u32, IMAGE_HEIGHT as u32),
+    write_ppm(
+        frame_buffer.width(),
+        frame_buffer.height(),
         frame_buffer.pixel_data(),
-        IMAGE_WIDTH * 4,
+        &mut io::stdout(),
     )?;
-    canvas.copy(&texture, None, None)?;
-    canvas.present();
-
-    'main: loop {
-        for event in events.poll_iter() {
-            match event {
-                sdl2::event::Event::Quit { .. } => break 'main,
-                _ => continue,
-            }
-        }
-    }
     Ok(())
 }
 
@@ -121,4 +95,17 @@ fn draw_background(frame_buffer: &mut FrameBuffer) {
             frame_buffer.set_pixel(x, y, color);
         }
     }
+}
+
+fn write_ppm(width: usize, height: usize, data: &[u8], mut writer: impl Write) -> io::Result<()> {
+    writeln!(writer, "P3")?;
+    writeln!(writer, "{width} {height}")?;
+    writeln!(writer, "255")?;
+    for [r, g, b, _] in data
+        .chunks_exact(4)
+        .map(|chunk| <[u8; 4]>::try_from(chunk).unwrap())
+    {
+        writeln!(writer, "{r} {g} {b}")?;
+    }
+    Ok(())
 }
