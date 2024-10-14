@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     draw_background(&mut frame_buffer);
     draw_scene(
         camera,
-        spheres.iter().copied(),
+        spheres.as_slice(),
         &mut frame_buffer,
         SAMPLES,
         &mut rng,
@@ -50,14 +50,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn draw_scene(
     camera: Camera,
-    spheres: impl Iterator<Item = Sphere>,
+    spheres: &[Sphere],
     frame_buffer: &mut FrameBuffer,
     samples: usize,
     rng: &mut rand::rngs::OsRng,
 ) -> Result<(), Box<dyn Error>> {
-    for sphere in spheres {
-        for y in 0..frame_buffer.height() {
-            for x in 0..frame_buffer.width() {
+    for y in 0..frame_buffer.height() {
+        for x in 0..frame_buffer.width() {
+            for sphere in spheres {
                 let color = std::iter::repeat_with(|| camera.cast(x as f64, y as f64, rng.gen()))
                     .map(|ray| {
                         if sphere.intersects(ray) {
