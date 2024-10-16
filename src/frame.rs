@@ -47,6 +47,10 @@ impl FrameBuffer {
         &self.pixel_data
     }
 
+    pub fn pixel_data_mut(&mut self) -> &mut [u8] {
+        &mut self.pixel_data
+    }
+
     pub fn set_pixel<T: Rgba32>(&mut self, x: usize, y: usize, color: T) {
         let start = (x + y * self.width) * 4;
         let stop = start + 4;

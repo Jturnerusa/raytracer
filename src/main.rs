@@ -1,43 +1,67 @@
 #![allow(dead_code, unused_imports)]
 mod camera;
 mod frame;
+mod hit;
 mod ray;
 mod sphere;
 
 use camera::Camera;
-use frame::FrameBuffer;
-use nalgebra::Vector3;
+use clap::Parser;
+use core::ops::Range;
+use frame::{FrameBuffer, Rgba32};
+use hit::Hit;
+use nalgebra::{ComplexField, Vector3};
+use rand::rngs::OsRng;
 use rand::Rng;
 use ray::Ray;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
+use rayon::slice::ParallelSliceMut;
 use sphere::Sphere;
 use std::error::Error;
 use std::io::{self, Write};
+use std::iter;
+use std::ops::Deref;
 
 const ASPECT_RATIO: f64 = 16.0 / 9.0;
-const IMAGE_WIDTH: usize = 1920 / 2 - 5;
-const IMAGE_HEIGHT: usize = (IMAGE_WIDTH as f64 / ASPECT_RATIO) as usize;
-const SAMPLES: usize = 20;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long)]
+    width: usize,
+    #[arg(long)]
+    samples: usize,
+    #[arg(long)]
+    bounces: usize,
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut frame_buffer = FrameBuffer::new(IMAGE_WIDTH, IMAGE_HEIGHT);
-    let mut rng = rand::rngs::OsRng;
-    let spheres = [Sphere {
-        center: Vector3::new(0.0, 0.0, 0.0),
-        radius: 0.25,
-    }];
+    let args = Args::parse();
+
+    let mut frame_buffer = FrameBuffer::new(args.width, args.width / ASPECT_RATIO as usize);
+    let spheres = [
+        Sphere {
+            center: Vector3::new(0.0, 0.0, -1.0),
+            radius: 0.5,
+        },
+        Sphere {
+            center: Vector3::new(0.0, -100.5, -1.0),
+            radius: 100.0,
+        },
+    ];
     let camera = Camera::new(
-        Vector3::new(0.0, 0.5, -2.0),
+        Vector3::new(0.0, 0.0, 1.0),
         ASPECT_RATIO,
         1.0,
-        IMAGE_WIDTH as u64,
+        args.width as u64,
     );
-    draw_background(&mut frame_buffer);
     draw_scene(
         camera,
         spheres.as_slice(),
         &mut frame_buffer,
-        SAMPLES,
-        &mut rng,
+        args.samples,
+        args.bounces,
     )?;
     write_ppm(
         frame_buffer.width(),
@@ -53,40 +77,73 @@ fn draw_scene(
     spheres: &[Sphere],
     frame_buffer: &mut FrameBuffer,
     samples: usize,
-    rng: &mut rand::rngs::OsRng,
+    bounces: usize,
 ) -> Result<(), Box<dyn Error>> {
-    for y in 0..frame_buffer.height() {
-        for x in 0..frame_buffer.width() {
-            for sphere in spheres {
-                let color = std::iter::repeat_with(|| camera.cast(x as f64, y as f64, rng.gen()))
-                    .map(|ray| {
-                        if sphere.intersects(ray) {
-                            Vector3::new(0.5, 0.5, 1.0)
-                        } else {
-                            frame_buffer.get_pixel(x, y)
-                        }
-                    })
+    let width = frame_buffer.width();
+    let height = frame_buffer.height();
+    frame_buffer
+        .pixel_data_mut()
+        .par_chunks_mut(4)
+        .enumerate()
+        .for_each(|(index, data)| {
+            let x = index % width;
+            let y = index / height;
+            let color =
+                iter::repeat_with(|| camera.cast(x as f64, y as f64, OsRng.gen_range(0.0..1.0)))
+                    .map(|ray| ray_color(spheres, ray, None, bounces))
                     .take(samples)
                     .reduce(|acc, e| acc + e)
                     .unwrap()
-                    / SAMPLES as f64;
-                frame_buffer.set_pixel(x, y, color);
-            }
-        }
-    }
+                    / samples as f64;
+            let (r, g, b, a) = color.to_rgba32();
+            data.copy_from_slice(&[r, g, b, a]);
+        });
+
     Ok(())
 }
 
-fn draw_background(frame_buffer: &mut FrameBuffer) {
-    let white = Vector3::new(1.0, 1.0, 1.0);
-    let blue = Vector3::new(0.5, 0.7, 1.0);
-    for y in 0..frame_buffer.height() {
-        for x in 0..frame_buffer.width() {
-            let a = y as f64 / IMAGE_HEIGHT as f64;
-            let color = (1.0 - a) * blue + a * white;
-            frame_buffer.set_pixel(x, y, color);
+fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize) -> Vector3<f64> {
+    for (i, sphere) in spheres.iter().copied().enumerate() {
+        if skip.is_some_and(|s| sphere == s) {
+            continue;
+        }
+        match sphere.hit(ray) {
+            Some(hit) => {
+                let random = loop {
+                    let random = Vector3::new(
+                        OsRng.gen_range(-1.0..1.0),
+                        OsRng.gen_range(-1.0..1.0),
+                        OsRng.gen_range(-1.0..1.0),
+                    );
+                    if random.dot(&random) <= 1.0 {
+                        break random / random.dot(&random).sqrt();
+                    } else {
+                        continue;
+                    };
+                };
+
+                let direction = hit.normal + random;
+                if bounces > 0 {
+                    return 0.7
+                        * ray_color(
+                            spheres,
+                            Ray {
+                                origin: hit.point,
+                                direction,
+                            },
+                            Some(sphere),
+                            bounces - 1,
+                        );
+                } else {
+                    break;
+                }
+            }
+            None => continue,
         }
     }
+    let unit_direction = ray.direction.y / ray.direction.dot(&ray.direction).sqrt();
+    let a = 0.5 * (unit_direction + 1.0);
+    (1.0 - a) * Vector3::new(1.0, 1.0, 1.0) + a * Vector3::new(0.5, 0.7, 1.0)
 }
 
 fn write_ppm(width: usize, height: usize, data: &[u8], mut writer: impl Write) -> io::Result<()> {
