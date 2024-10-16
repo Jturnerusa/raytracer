@@ -1,10 +1,14 @@
-use crate::{hit::Record, ray, Hit, Ray};
+use crate::{
+    hit::{Material, Record},
+    Hit, Ray,
+};
 use nalgebra::Vector3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sphere {
     pub center: Vector3<f64>,
     pub radius: f64,
+    pub material: Material,
 }
 
 impl Hit for Sphere {
@@ -13,7 +17,7 @@ impl Hit for Sphere {
         let a = ray.direction.dot(&ray.direction);
         let h = ray.direction.dot(&oc);
         let c = oc.dot(&oc) - self.radius * self.radius;
-        let d = h * h - a * c;
+        let d = (h * h) - (a * c);
 
         if d < 0.0 {
             None
@@ -26,6 +30,7 @@ impl Hit for Sphere {
                 normal,
                 t: root,
                 front: ray.direction.dot(&normal) > 0.0,
+                material: self.material,
             })
         }
     }

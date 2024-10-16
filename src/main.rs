@@ -9,8 +9,8 @@ use camera::Camera;
 use clap::Parser;
 use core::ops::Range;
 use frame::{FrameBuffer, Rgba32};
-use hit::Hit;
-use nalgebra::{ComplexField, Vector3};
+use hit::{Hit, Material};
+use nalgebra::{ComplexField, Vector1, Vector3};
 use rand::rngs::OsRng;
 use rand::Rng;
 use ray::Ray;
@@ -44,16 +44,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         Sphere {
             center: Vector3::new(0.0, 0.0, -1.0),
             radius: 0.5,
+            material: Material::Diffuse(Vector3::new(0.0, 0.0, 1.0)),
         },
         Sphere {
-            center: Vector3::new(0.0, -100.5, -1.0),
+            center: Vector3::new(0.5, 0.0, 0.5),
+            radius: 0.25,
+            material: Material::Metal(Vector3::new(0.0, 1.0, 0.0)),
+        },
+        Sphere {
+            center: Vector3::new(-0.5, 0.0, 0.5),
+            radius: 0.25,
+            material: Material::Metal(Vector3::new(1.0, 0.0, 0.0)),
+        },
+        Sphere {
+            center: Vector3::new(0.0, -100.5, 2.0),
             radius: 100.0,
+            material: Material::Diffuse(Vector3::new(0.5, 0.5, 1.0)),
         },
     ];
     let camera = Camera::new(
-        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(0.0, 0.0, 2.0),
         ASPECT_RATIO,
-        1.0,
+        0.5,
         args.width as u64,
     );
     draw_scene(
@@ -80,64 +92,73 @@ fn draw_scene(
     bounces: usize,
 ) -> Result<(), Box<dyn Error>> {
     let width = frame_buffer.width();
-    let height = frame_buffer.height();
     frame_buffer
         .pixel_data_mut()
-        .par_chunks_mut(4)
+        .par_chunks_mut(width * 4)
         .enumerate()
-        .for_each(|(index, data)| {
-            let x = index % width;
-            let y = index / height;
-            let color =
-                iter::repeat_with(|| camera.cast(x as f64, y as f64, OsRng.gen_range(0.0..1.0)))
-                    .map(|ray| ray_color(spheres, ray, None, bounces))
-                    .take(samples)
-                    .reduce(|acc, e| acc + e)
-                    .unwrap()
+        .for_each(|(y, data)| {
+            for x in 0..width {
+                let color = iter::repeat_with(|| {
+                    camera.cast(x as f64, y as f64, OsRng.gen_range(0.0..1.0))
+                })
+                .map(|ray| ray_color(spheres, ray, None, bounces))
+                .take(samples)
+                .reduce(|acc, e| acc + e)
+                .unwrap()
                     / samples as f64;
-            let (r, g, b, a) = color.to_rgba32();
-            data.copy_from_slice(&[r, g, b, a]);
+                let i = x * 4;
+                let (r, g, b, a) = color.to_rgba32();
+                data[i..i + 4].copy_from_slice(&[r, g, b, a]);
+            }
         });
 
     Ok(())
 }
 
 fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize) -> Vector3<f64> {
-    for (i, sphere) in spheres.iter().copied().enumerate() {
-        if skip.is_some_and(|s| sphere == s) {
+    for sphere in spheres {
+        if skip.is_some_and(|s| *sphere == s) {
             continue;
         }
         match sphere.hit(ray) {
-            Some(hit) => {
-                let random = loop {
-                    let random = Vector3::new(
-                        OsRng.gen_range(-1.0..1.0),
-                        OsRng.gen_range(-1.0..1.0),
-                        OsRng.gen_range(-1.0..1.0),
-                    );
-                    if random.dot(&random) <= 1.0 {
-                        break random / random.dot(&random).sqrt();
+            Some(hit) => match hit.material {
+                Material::Diffuse(color) => {
+                    let direction = hit.normal + random_unit_vec();
+                    if bounces > 0 {
+                        return 0.7
+                            * ray_color(
+                                spheres,
+                                Ray {
+                                    origin: hit.point,
+                                    direction,
+                                },
+                                Some(*sphere),
+                                bounces - 1,
+                            )
+                            .component_mul(&color);
                     } else {
-                        continue;
-                    };
-                };
-
-                let direction = hit.normal + random;
-                if bounces > 0 {
-                    return 0.7
-                        * ray_color(
+                        break;
+                    }
+                }
+                Material::Metal(color) => {
+                    if bounces > 0 {
+                        let direction =
+                            ray.direction - (2.0 * ray.direction.dot(&hit.normal) * hit.normal);
+                        return ray_color(
                             spheres,
                             Ray {
                                 origin: hit.point,
                                 direction,
                             },
-                            Some(sphere),
+                            Some(*sphere),
                             bounces - 1,
-                        );
-                } else {
-                    break;
+                        )
+                        .component_mul(&color);
+                    } else {
+                        break;
+                    }
                 }
-            }
+            },
             None => continue,
         }
     }
@@ -157,4 +178,19 @@ fn write_ppm(width: usize, height: usize, data: &[u8], mut writer: impl Write) -
         writeln!(writer, "{r} {g} {b}")?;
     }
     Ok(())
+}
+
+fn random_unit_vec() -> Vector3<f64> {
+    loop {
+        let random = Vector3::new(
+            OsRng.gen_range(-1.0..1.0),
+            OsRng.gen_range(-1.0..1.0),
+            OsRng.gen_range(-1.0..1.0),
+        );
+        if random.dot(&random) <= 1.0 {
+            break random / random.dot(&random).sqrt();
+        } else {
+            continue;
+        };
+    }
 }
