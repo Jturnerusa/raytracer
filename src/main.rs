@@ -151,8 +151,7 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
                     if bounces > 0 {
                         let reflected =
                             ray.direction - (2.0 * ray.direction.dot(&hit.normal) * hit.normal);
-                        let fuzzed = (reflected / reflected.dot(&reflected).sqrt())
-                            + (fuzz * random_unit_vec());
+                        let fuzzed = reflected.normalize() + (fuzz * random_unit_vec());
                         return ray_color(
                             spheres,
                             Ray {
@@ -168,10 +167,11 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
                     }
                 }
                 Material::Glass(color, refraction) => {
-                    let uv = ray.direction / ray.direction.dot(&ray.direction).sqrt();
+                    let uv = ray.direction.normalize();
                     let cos_theta = -uv.dot(&hit.normal).min(1.0);
                     let out_perp = refraction * (uv + cos_theta * hit.normal);
-                    let out_parallel = -(1.0 - out_perp.dot(&out_perp)).abs().sqrt() * hit.normal;
+                    let out_parallel =
+                        -(1.0 - out_perp.magnitude_squared().abs().sqrt()) * hit.normal;
                     let refracted = out_perp + out_parallel;
 
                     if bounces > 0 {
@@ -194,7 +194,7 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
         }
     }
 
-    let unit_direction = ray.direction.y / ray.direction.dot(&ray.direction).sqrt();
+    let unit_direction = ray.direction.y / ray.direction.magnitude();
     let a = 0.5 * (unit_direction + 1.0);
     (1.0 - a) * Vector3::new(1.0, 1.0, 1.0) + a * Vector3::new(0.5, 0.7, 1.0)
 }
