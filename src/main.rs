@@ -34,6 +34,8 @@ struct Args {
     samples: usize,
     #[arg(long)]
     bounces: usize,
+    #[arg(long)]
+    count: isize,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -41,33 +43,52 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut frame_buffer = FrameBuffer::new(args.width, args.width / ASPECT_RATIO as usize);
 
-    let spheres = [
-        Sphere {
-            center: Vector3::new(0.0, 0.0, -1.0),
-            radius: 0.5,
-            material: Material::Diffuse(Vector3::new(0.0, 0.0, 1.0), 0.7),
-        },
-        Sphere {
-            center: Vector3::new(0.5, 0.0, 0.5),
-            radius: 0.25,
-            material: Material::Metal(Vector3::new(0.0, 1.0, 0.0), 0.9),
-        },
-        Sphere {
-            center: Vector3::new(-0.5, 0.0, 0.5),
-            radius: 0.25,
-            material: Material::Glass(Vector3::new(1.0, 1.0, 1.0), 1.5),
-        },
-        Sphere {
-            center: Vector3::new(0.0, -100.5, 2.0),
-            radius: 100.0,
-            material: Material::Diffuse(Vector3::new(0.5, 0.5, 1.0), 0.5),
-        },
-    ];
+    let mut spheres = Vec::new();
+
+    spheres.push(Sphere {
+        center: Vector3::new(4.5, 0.0, 1.0),
+        radius: 3.0,
+        material: Material::Glass(Vector3::new(1.0, 1.0, 1.0), 0.0),
+    });
+
+    spheres.push(Sphere {
+        center: Vector3::new(-4.5, 0.0, 1.0),
+        radius: 3.0,
+        material: Material::Metal(Vector3::new(1.0, 1.0, 1.0), 0.0),
+    });
+
+    for x in (-args.count..args.count).map(|x| x as f64 * 1.1) {
+        for y in (-args.count..args.count).map(|y| y as f64 * 1.1) {
+            spheres.push(Sphere {
+                center: Vector3::new(
+                    x + 0.9 * OsRng.gen_range(0.0..1.0),
+                    0.2,
+                    y + 0.9 * OsRng.gen_range(0.0..1.0),
+                ),
+                radius: OsRng.gen_range(0.1..0.3),
+                material: Material::Diffuse(
+                    Vector3::new(
+                        OsRng.gen_range(0.0..1.0),
+                        OsRng.gen_range(0.0..1.0),
+                        OsRng.gen_range(0.0..1.0),
+                    ),
+                    OsRng.gen_range(0.1..1.0),
+                ),
+            });
+        }
+    }
+
+    spheres.push(Sphere {
+        center: Vector3::new(0.0, -1005.0, 0.0),
+        radius: 1005.0,
+        material: Material::Diffuse(Vector3::new(0.7, 0.7, 0.7), 0.7),
+    });
 
     let camera = Camera::new(
-        Vector3::new(0.0, 0.0, 2.0),
+        Vector3::new(0.0, 0.0, -1.0),
+        Vector3::new(0.0, 10.0, -10.0),
+        90.0,
         ASPECT_RATIO,
-        1.0,
         args.width as u64,
     );
 
@@ -224,5 +245,22 @@ fn random_unit_vec() -> Vector3<f64> {
         } else {
             continue;
         };
+    }
+}
+
+fn random_material() -> Material {
+    let material = OsRng.gen_range(0..3);
+
+    let color = Vector3::new(
+        OsRng.gen_range(0.0..1.0),
+        OsRng.gen_range(0.0..1.0),
+        OsRng.gen_range(0.0..1.0),
+    );
+
+    match material {
+        0 => Material::Diffuse(color, OsRng.gen_range(0.0..1.0)),
+        1 => Material::Metal(color, OsRng.gen_range(0.0..1.0)),
+        2 => Material::Glass(color, OsRng.gen_range(0.0..10.0)),
+        _ => unreachable!(),
     }
 }
