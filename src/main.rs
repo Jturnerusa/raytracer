@@ -40,34 +40,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     let mut frame_buffer = FrameBuffer::new(args.width, args.width / ASPECT_RATIO as usize);
+
     let spheres = [
         Sphere {
             center: Vector3::new(0.0, 0.0, -1.0),
             radius: 0.5,
-            material: Material::Diffuse(Vector3::new(0.0, 0.0, 1.0)),
+            material: Material::Diffuse(Vector3::new(0.0, 0.0, 1.0), 0.7),
         },
         Sphere {
             center: Vector3::new(0.5, 0.0, 0.5),
             radius: 0.25,
-            material: Material::Metal(Vector3::new(0.0, 1.0, 0.0)),
+            material: Material::Metal(Vector3::new(0.0, 1.0, 0.0), 0.9),
         },
         Sphere {
             center: Vector3::new(-0.5, 0.0, 0.5),
             radius: 0.25,
-            material: Material::Metal(Vector3::new(1.0, 0.0, 0.0)),
+            material: Material::Glass(Vector3::new(1.0, 1.0, 1.0), 1.5),
         },
         Sphere {
             center: Vector3::new(0.0, -100.5, 2.0),
             radius: 100.0,
-            material: Material::Diffuse(Vector3::new(0.5, 0.5, 1.0)),
+            material: Material::Diffuse(Vector3::new(0.5, 0.5, 1.0), 0.5),
         },
     ];
+
     let camera = Camera::new(
         Vector3::new(0.0, 0.0, 2.0),
         ASPECT_RATIO,
-        0.5,
+        1.0,
         args.width as u64,
     );
+
     draw_scene(
         camera,
         spheres.as_slice(),
@@ -75,12 +78,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         args.samples,
         args.bounces,
     )?;
+
     write_ppm(
         frame_buffer.width(),
         frame_buffer.height(),
         frame_buffer.pixel_data(),
         &mut io::stdout(),
     )?;
+
     Ok(())
 }
 
@@ -97,6 +102,7 @@ fn draw_scene(
         .par_chunks_mut(width * 4)
         .enumerate()
         .for_each(|(y, data)| {
+            eprintln!("rendering line {y}");
             for x in 0..width {
                 let color = iter::repeat_with(|| {
                     camera.cast(x as f64, y as f64, OsRng.gen_range(0.0..1.0))
@@ -117,15 +123,16 @@ fn draw_scene(
 
 fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize) -> Vector3<f64> {
     for sphere in spheres {
-        if skip.is_some_and(|s| *sphere == s) {
+        if matches!(skip, Some(skip) if skip == *sphere) {
             continue;
         }
+
         match sphere.hit(ray) {
             Some(hit) => match hit.material {
-                Material::Diffuse(color) => {
+                Material::Diffuse(color, factor) => {
                     let direction = hit.normal + random_unit_vec();
                     if bounces > 0 {
-                        return 0.7
+                        return factor
                             * ray_color(
                                 spheres,
                                 Ray {
@@ -140,15 +147,39 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
                         break;
                     }
                 }
-                Material::Metal(color) => {
+                Material::Metal(color, fuzz) => {
                     if bounces > 0 {
-                        let direction =
+                        let reflected =
                             ray.direction - (2.0 * ray.direction.dot(&hit.normal) * hit.normal);
+                        let fuzzed = (reflected / reflected.dot(&reflected).sqrt())
+                            + (fuzz * random_unit_vec());
                         return ray_color(
                             spheres,
                             Ray {
                                 origin: hit.point,
-                                direction,
+                                direction: fuzzed,
+                            },
+                            Some(*sphere),
+                            bounces - 1,
+                        )
+                        .component_mul(&color);
+                    } else {
+                        break;
+                    }
+                }
+                Material::Glass(color, refraction) => {
+                    let uv = ray.direction / ray.direction.dot(&ray.direction).sqrt();
+                    let cos_theta = -uv.dot(&hit.normal).min(1.0);
+                    let out_perp = refraction * (uv + cos_theta * hit.normal);
+                    let out_parallel = -(1.0 - out_perp.dot(&out_perp)).abs().sqrt() * hit.normal;
+                    let refracted = out_perp + out_parallel;
+
+                    if bounces > 0 {
+                        return ray_color(
+                            spheres,
+                            Ray {
+                                origin: hit.point,
+                                direction: refracted,
                             },
                             Some(*sphere),
                             bounces - 1,
@@ -162,6 +193,7 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
             None => continue,
         }
     }
+
     let unit_direction = ray.direction.y / ray.direction.dot(&ray.direction).sqrt();
     let a = 0.5 * (unit_direction + 1.0);
     (1.0 - a) * Vector3::new(1.0, 1.0, 1.0) + a * Vector3::new(0.5, 0.7, 1.0)

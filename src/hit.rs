@@ -7,8 +7,9 @@ pub(crate) trait Hit {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Material {
-    Diffuse(Vector3<f64>),
-    Metal(Vector3<f64>),
+    Diffuse(Vector3<f64>, f64),
+    Metal(Vector3<f64>, f64),
+    Glass(Vector3<f64>, f64),
 }
 
 pub(crate) struct Record {
