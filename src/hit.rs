@@ -10,6 +10,7 @@ pub(crate) enum Material {
     Diffuse(Vector3<f64>, f64),
     Metal(Vector3<f64>, f64),
     Glass(Vector3<f64>, f64),
+    Light(Vector3<f64>, f64),
 }
 
 pub(crate) struct Record {

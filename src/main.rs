@@ -1,28 +1,26 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 mod camera;
 mod frame;
 mod hit;
+mod quad;
 mod ray;
 mod sphere;
 
 use camera::Camera;
 use clap::Parser;
-use core::ops::Range;
 use frame::{FrameBuffer, Rgba32};
 use hit::{Hit, Material};
-use nalgebra::{ComplexField, Vector1, Vector3};
+use nalgebra::{ComplexField, Vector3};
+use quad::Quad;
 use rand::rngs::OsRng;
 use rand::Rng;
 use ray::Ray;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use sphere::Sphere;
 use std::error::Error;
 use std::io::{self, Write};
 use std::iter;
-use std::ops::Deref;
 
 const ASPECT_RATIO: f64 = 16.0 / 9.0;
 
@@ -34,8 +32,21 @@ struct Args {
     samples: usize,
     #[arg(long)]
     bounces: usize,
-    #[arg(long)]
-    count: isize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Shape {
+    Sphere(Sphere),
+    Quad(Quad),
+}
+
+impl Hit for Shape {
+    fn hit(&self, ray: Ray) -> Option<hit::Record> {
+        match self {
+            Self::Sphere(sphere) => sphere.hit(ray),
+            Self::Quad(quad) => quad.hit(ray),
+        }
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -43,50 +54,57 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut frame_buffer = FrameBuffer::new(args.width, args.width / ASPECT_RATIO as usize);
 
-    let mut spheres = Vec::new();
+    let red = Vector3::new(0.65, 0.05, 0.5);
+    let white = Vector3::new(0.73, 0.73, 0.73);
+    let green = Vector3::new(0.12, 0.45, 0.15);
 
-    spheres.push(Sphere {
-        center: Vector3::new(4.5, 0.0, 1.0),
-        radius: 3.0,
-        material: Material::Glass(Vector3::new(1.0, 1.0, 1.0), 0.0),
-    });
-
-    spheres.push(Sphere {
-        center: Vector3::new(-4.5, 0.0, 1.0),
-        radius: 3.0,
-        material: Material::Metal(Vector3::new(1.0, 1.0, 1.0), 0.0),
-    });
-
-    for x in (-args.count..args.count).map(|x| x as f64 * 1.1) {
-        for y in (-args.count..args.count).map(|y| y as f64 * 1.1) {
-            spheres.push(Sphere {
-                center: Vector3::new(
-                    x + 0.9 * OsRng.gen_range(0.0..1.0),
-                    0.2,
-                    y + 0.9 * OsRng.gen_range(0.0..1.0),
-                ),
-                radius: OsRng.gen_range(0.1..0.3),
-                material: Material::Diffuse(
-                    Vector3::new(
-                        OsRng.gen_range(0.0..1.0),
-                        OsRng.gen_range(0.0..1.0),
-                        OsRng.gen_range(0.0..1.0),
-                    ),
-                    OsRng.gen_range(0.1..1.0),
-                ),
-            });
-        }
-    }
-
-    spheres.push(Sphere {
-        center: Vector3::new(0.0, -1005.0, 0.0),
-        radius: 1005.0,
-        material: Material::Diffuse(Vector3::new(0.7, 0.7, 0.7), 0.7),
-    });
+    let shapes = [
+        Shape::Sphere(Sphere {
+            center: Vector3::new(250.0, 200.0, 0.0),
+            radius: 30.0,
+            material: Material::Glass(white, 1.0),
+        }),
+        Shape::Quad(Quad {
+            q: Vector3::new(555.0, 0.0, 0.0),
+            u: Vector3::new(0.0, 555.0, 0.0),
+            v: Vector3::new(0.0, 0.0, 555.0),
+            material: Material::Diffuse(green, 1.5),
+        }),
+        Shape::Quad(Quad {
+            q: Vector3::new(0.0, 0.0, 0.0),
+            u: Vector3::new(0.0, 555.0, 0.0),
+            v: Vector3::new(0.0, 0.0, 555.0),
+            material: Material::Diffuse(red, 1.5),
+        }),
+        Shape::Quad(Quad {
+            q: Vector3::new(0.0, 0.0, 0.0),
+            u: Vector3::new(555.0, 0.0, 0.0),
+            v: Vector3::new(0.0, 0.0, 555.0),
+            material: Material::Diffuse(white, 1.5),
+        }),
+        Shape::Quad(Quad {
+            q: Vector3::new(555.0, 555.0, 555.0),
+            u: Vector3::new(-555.0, 0.0, 0.0),
+            v: Vector3::new(0.0, 0.0, -555.0),
+            material: Material::Diffuse(white, 1.5),
+        }),
+        Shape::Quad(Quad {
+            q: Vector3::new(0.0, 0.0, 555.0),
+            u: Vector3::new(555.0, 0.0, 0.0),
+            v: Vector3::new(0.0, 555.0, 0.0),
+            material: Material::Diffuse(white, 1.5),
+        }),
+        Shape::Quad(Quad {
+            q: Vector3::new(343.0, 554.0, 332.0),
+            u: Vector3::new(-130.0, 0.0, 0.0),
+            v: Vector3::new(0.0, 0.0, -165.0),
+            material: Material::Light(Vector3::new(1.0, 1.0, 1.0), 25.5),
+        }),
+    ];
 
     let camera = Camera::new(
-        Vector3::new(0.0, 0.0, -1.0),
-        Vector3::new(0.0, 10.0, -10.0),
+        Vector3::new(278.0, 278.0, 0.0),
+        Vector3::new(278.0, 278.0, -200.0),
         90.0,
         ASPECT_RATIO,
         args.width as u64,
@@ -94,7 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     draw_scene(
         camera,
-        spheres.as_slice(),
+        shapes.as_slice(),
         &mut frame_buffer,
         args.samples,
         args.bounces,
@@ -112,7 +130,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn draw_scene(
     camera: Camera,
-    spheres: &[Sphere],
+    shapes: &[Shape],
     frame_buffer: &mut FrameBuffer,
     samples: usize,
     bounces: usize,
@@ -128,11 +146,12 @@ fn draw_scene(
                 let color = iter::repeat_with(|| {
                     camera.cast(x as f64, y as f64, OsRng.gen_range(0.0..1.0))
                 })
-                .map(|ray| ray_color(spheres, ray, None, bounces))
+                .map(|ray| ray_color(shapes, ray, None, bounces))
                 .take(samples)
                 .reduce(|acc, e| acc + e)
                 .unwrap()
                     / samples as f64;
+
                 let i = x * 4;
                 let (r, g, b, a) = color.to_rgba32();
                 data[i..i + 4].copy_from_slice(&[r, g, b, a]);
@@ -142,25 +161,25 @@ fn draw_scene(
     Ok(())
 }
 
-fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize) -> Vector3<f64> {
-    for sphere in spheres {
-        if matches!(skip, Some(skip) if skip == *sphere) {
+fn ray_color(shapes: &[Shape], ray: Ray, skip: Option<Shape>, bounces: usize) -> Vector3<f64> {
+    for shape in shapes {
+        if matches!(skip, Some(skip) if skip == *shape) {
             continue;
         }
 
-        match sphere.hit(ray) {
+        match shape.hit(ray) {
             Some(hit) => match hit.material {
                 Material::Diffuse(color, factor) => {
                     let direction = hit.normal + random_unit_vec();
                     if bounces > 0 {
                         return factor
                             * ray_color(
-                                spheres,
+                                shapes,
                                 Ray {
                                     origin: hit.point,
                                     direction,
                                 },
-                                Some(*sphere),
+                                Some(*shape),
                                 bounces - 1,
                             )
                             .component_mul(&color);
@@ -174,12 +193,12 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
                             ray.direction - (2.0 * ray.direction.dot(&hit.normal) * hit.normal);
                         let fuzzed = reflected.normalize() + (fuzz * random_unit_vec());
                         return ray_color(
-                            spheres,
+                            shapes,
                             Ray {
                                 origin: hit.point,
                                 direction: fuzzed,
                             },
-                            Some(*sphere),
+                            Some(*shape),
                             bounces - 1,
                         )
                         .component_mul(&color);
@@ -197,15 +216,31 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
 
                     if bounces > 0 {
                         return ray_color(
-                            spheres,
+                            shapes,
                             Ray {
                                 origin: hit.point,
                                 direction: refracted,
                             },
-                            Some(*sphere),
+                            Some(*shape),
                             bounces - 1,
                         )
                         .component_mul(&color);
+                    } else {
+                        break;
+                    }
+                }
+                Material::Light(color, intensity) => {
+                    if bounces > 0 {
+                        let direction = hit.normal + random_unit_vec();
+                        return ray_color(
+                            shapes,
+                            Ray {
+                                origin: hit.point,
+                                direction,
+                            },
+                            Some(*shape),
+                            bounces - 1,
+                        ) + color * intensity;
                     } else {
                         break;
                     }
@@ -215,9 +250,7 @@ fn ray_color(spheres: &[Sphere], ray: Ray, skip: Option<Sphere>, bounces: usize)
         }
     }
 
-    let unit_direction = ray.direction.y / ray.direction.magnitude();
-    let a = 0.5 * (unit_direction + 1.0);
-    (1.0 - a) * Vector3::new(1.0, 1.0, 1.0) + a * Vector3::new(0.5, 0.7, 1.0)
+    Vector3::new(0.0, 0.0, 0.0)
 }
 
 fn write_ppm(width: usize, height: usize, data: &[u8], mut writer: impl Write) -> io::Result<()> {
