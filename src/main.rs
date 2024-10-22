@@ -52,6 +52,22 @@ impl Hit for Shape {
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
+    let height = args.width / ASPECT_RATIO as usize;
+
+    let context = sdl2::init()?;
+    let video = context.video()?;
+    let window = video
+        .window("raytracer", args.width as u32, height as u32)
+        .build()?;
+    let mut canvas = window.into_canvas().build()?;
+    let texture_creator = canvas.texture_creator();
+    let mut texture = texture_creator.create_texture_streaming(
+        sdl2::pixels::PixelFormatEnum::RGBA32,
+        args.width as u32,
+        height as u32,
+    )?;
+    let mut events = context.event_pump()?;
+
     let mut frame_buffer = FrameBuffer::new(args.width, args.width / ASPECT_RATIO as usize);
 
     let red = Vector3::new(0.65, 0.05, 0.5);
@@ -110,17 +126,51 @@ fn main() -> Result<(), Box<dyn Error>> {
         args.width as u64,
     );
 
-    draw_scene(
-        camera,
-        shapes.as_slice(),
-        &mut frame_buffer,
-        args.samples,
-        args.bounces,
+    texture.update(
+        sdl2::rect::Rect::new(0, 0, args.width as u32, height as u32),
+        frame_buffer.pixel_data(),
+        args.width,
     )?;
 
+    canvas.copy(&texture, None, None)?;
+    canvas.present();
+
+    for line in 0..height {
+        draw_line(
+            &camera,
+            &shapes,
+            &mut frame_buffer,
+            line,
+            args.samples,
+            args.bounces,
+        );
+
+        texture.update(
+            sdl2::rect::Rect::new(0, 0, args.width as u32, height as u32),
+            frame_buffer.pixel_data(),
+            args.width * 4,
+        )?;
+
+        canvas.copy(&texture, None, None)?;
+        canvas.present();
+    }
+
+    'main: loop {
+        for event in events.poll_iter() {
+            match event {
+                sdl2::event::Event::Quit { .. } => break 'main,
+                sdl2::event::Event::KeyUp { keycode, .. } => match keycode {
+                    Some(sdl2::keyboard::Keycode::Escape) => break 'main,
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+    }
+
     write_ppm(
-        frame_buffer.width(),
-        frame_buffer.height(),
+        args.width,
+        height,
         frame_buffer.pixel_data(),
         &mut io::stdout(),
     )?;
@@ -128,37 +178,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn draw_scene(
-    camera: Camera,
+fn draw_line(
+    camera: &Camera,
     shapes: &[Shape],
     frame_buffer: &mut FrameBuffer,
+    line: usize,
     samples: usize,
     bounces: usize,
-) -> Result<(), Box<dyn Error>> {
+) {
     let width = frame_buffer.width();
-    frame_buffer
-        .pixel_data_mut()
-        .par_chunks_mut(width * 4)
+
+    frame_buffer.pixel_data_mut()[line * width * 4..(line * width * 4) + width * 4]
+        .par_chunks_mut(4)
         .enumerate()
-        .for_each(|(y, data)| {
-            eprintln!("rendering line {y}");
-            for x in 0..width {
-                let color = iter::repeat_with(|| {
-                    camera.cast(x as f64, y as f64, OsRng.gen_range(0.0..1.0))
-                })
-                .map(|ray| ray_color(shapes, ray, None, bounces))
-                .take(samples)
-                .reduce(|acc, e| acc + e)
-                .unwrap()
-                    / samples as f64;
+        .for_each(|(index, pixel)| {
+            let color = iter::repeat_with(|| {
+                camera.cast(index as f64, line as f64, OsRng.gen_range(0.0..1.0))
+            })
+            .map(|ray| ray_color(shapes, ray, None, bounces))
+            .take(samples)
+            .reduce(|acc, e| acc + e)
+            .unwrap()
+                / samples as f64;
 
-                let i = x * 4;
-                let (r, g, b, a) = color.to_rgba32();
-                data[i..i + 4].copy_from_slice(&[r, g, b, a]);
-            }
+            let (r, g, b, a) = color.to_rgba32();
+
+            pixel.copy_from_slice(&[r, g, b, a]);
         });
-
-    Ok(())
 }
 
 fn ray_color(shapes: &[Shape], ray: Ray, skip: Option<Shape>, bounces: usize) -> Vector3<f64> {
