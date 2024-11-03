@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 use crate::{
     hit::{Material, Record},
     Hit,
@@ -13,7 +15,7 @@ pub struct Quad {
 }
 
 impl Hit for Quad {
-    fn hit(&self, ray: crate::ray::Ray) -> Option<crate::hit::Record> {
+    fn hit(&self, ray: crate::ray::Ray, interval: Range<f64>) -> Option<crate::hit::Record> {
         let n = self.u.cross(&self.v);
         let normal = n.normalize();
         let d = normal.dot(&self.q);
@@ -27,6 +29,10 @@ impl Hit for Quad {
 
         let t = (d - normal.dot(&ray.origin)) / denom;
 
+        if !interval.contains(&t) {
+            return None;
+        }
+
         let intersection = ray.at(t);
         let p = intersection - self.q;
         let alpha = w.dot(&p.cross(&self.v));
@@ -35,7 +41,11 @@ impl Hit for Quad {
         if (0.0..=1.0).contains(&alpha) && (0.0..=1.0).contains(&beta) {
             Some(Record {
                 point: intersection,
-                normal,
+                normal: if ray.direction.dot(&normal) < 0.0 {
+                    normal
+                } else {
+                    -normal
+                },
                 front: true,
                 t,
                 material: self.material,

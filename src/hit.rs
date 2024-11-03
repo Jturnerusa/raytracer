@@ -1,8 +1,10 @@
+use std::ops::Range;
+
 use crate::{frame::Rgba32, Ray};
 use nalgebra::Vector3;
 
 pub(crate) trait Hit {
-    fn hit(&self, ray: Ray) -> Option<Record>;
+    fn hit(&self, ray: Ray, interval: Range<f64>) -> Option<Record>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

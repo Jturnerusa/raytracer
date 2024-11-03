@@ -8,8 +8,9 @@ mod sphere;
 
 use camera::Camera;
 use clap::Parser;
+use core::ops::Range;
 use frame::{FrameBuffer, Rgba32};
-use hit::{Hit, Material};
+use hit::{Hit, Material, Record};
 use nalgebra::{ComplexField, Vector3};
 use quad::Quad;
 use rand::rngs::OsRng;
@@ -41,10 +42,10 @@ enum Shape {
 }
 
 impl Hit for Shape {
-    fn hit(&self, ray: Ray) -> Option<hit::Record> {
+    fn hit(&self, ray: Ray, interval: Range<f64>) -> Option<hit::Record> {
         match self {
-            Self::Sphere(sphere) => sphere.hit(ray),
-            Self::Quad(quad) => quad.hit(ray),
+            Self::Sphere(sphere) => sphere.hit(ray, interval),
+            Self::Quad(quad) => quad.hit(ray, interval),
         }
     }
 }
@@ -78,7 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Shape::Sphere(Sphere {
             center: Vector3::new(250.0, 200.0, 0.0),
             radius: 30.0,
-            material: Material::Glass(white, 1.0),
+            material: Material::Diffuse(white, 1.0),
         }),
         Shape::Quad(Quad {
             q: Vector3::new(555.0, 0.0, 0.0),
@@ -195,7 +196,7 @@ fn draw_line(
             let color = iter::repeat_with(|| {
                 camera.cast(index as f64, line as f64, OsRng.gen_range(0.0..1.0))
             })
-            .map(|ray| ray_color(shapes, ray, None, bounces))
+            .map(|ray| ray_color(shapes, ray, bounces))
             .take(samples)
             .reduce(|acc, e| acc + e)
             .unwrap()
@@ -207,96 +208,52 @@ fn draw_line(
         });
 }
 
-fn ray_color(shapes: &[Shape], ray: Ray, skip: Option<Shape>, bounces: usize) -> Vector3<f64> {
+fn ray_color(shapes: &[Shape], ray: Ray, bounces: usize) -> Vector3<f64> {
+    match hit(shapes, ray) {
+        Some(hit) if bounces > 0 => match hit.material {
+            Material::Diffuse(color, adsorption) => {
+                ray_color(
+                    shapes,
+                    Ray {
+                        origin: hit.point,
+                        direction: hit.normal + random_unit_vec(),
+                    },
+                    bounces - 1,
+                )
+                .component_mul(&color)
+                    * adsorption
+            }
+            Material::Light(color, intensity) => {
+                ray_color(
+                    shapes,
+                    Ray {
+                        origin: hit.point,
+                        direction: hit.normal + random_unit_vec(),
+                    },
+                    bounces - 1,
+                ) + color * intensity
+            }
+            _ => Vector3::new(0.0, 0.0, 0.0),
+        },
+        _ => Vector3::new(0.0, 0.0, 0.0),
+    }
+}
+
+fn hit(shapes: &[Shape], ray: Ray) -> Option<Record> {
+    let mut interval = f64::EPSILON..f64::INFINITY;
+    let mut hit = None;
+
     for shape in shapes {
-        if matches!(skip, Some(skip) if skip == *shape) {
-            continue;
-        }
-
-        match shape.hit(ray) {
-            Some(hit) => match hit.material {
-                Material::Diffuse(color, factor) => {
-                    let direction = hit.normal + random_unit_vec();
-                    if bounces > 0 {
-                        return factor
-                            * ray_color(
-                                shapes,
-                                Ray {
-                                    origin: hit.point,
-                                    direction,
-                                },
-                                Some(*shape),
-                                bounces - 1,
-                            )
-                            .component_mul(&color);
-                    } else {
-                        break;
-                    }
-                }
-                Material::Metal(color, fuzz) => {
-                    if bounces > 0 {
-                        let reflected =
-                            ray.direction - (2.0 * ray.direction.dot(&hit.normal) * hit.normal);
-                        let fuzzed = reflected.normalize() + (fuzz * random_unit_vec());
-                        return ray_color(
-                            shapes,
-                            Ray {
-                                origin: hit.point,
-                                direction: fuzzed,
-                            },
-                            Some(*shape),
-                            bounces - 1,
-                        )
-                        .component_mul(&color);
-                    } else {
-                        break;
-                    }
-                }
-                Material::Glass(color, refraction) => {
-                    let uv = ray.direction.normalize();
-                    let cos_theta = -uv.dot(&hit.normal).min(1.0);
-                    let out_perp = refraction * (uv + cos_theta * hit.normal);
-                    let out_parallel =
-                        -(1.0 - out_perp.magnitude_squared().abs().sqrt()) * hit.normal;
-                    let refracted = out_perp + out_parallel;
-
-                    if bounces > 0 {
-                        return ray_color(
-                            shapes,
-                            Ray {
-                                origin: hit.point,
-                                direction: refracted,
-                            },
-                            Some(*shape),
-                            bounces - 1,
-                        )
-                        .component_mul(&color);
-                    } else {
-                        break;
-                    }
-                }
-                Material::Light(color, intensity) => {
-                    if bounces > 0 {
-                        let direction = hit.normal + random_unit_vec();
-                        return ray_color(
-                            shapes,
-                            Ray {
-                                origin: hit.point,
-                                direction,
-                            },
-                            Some(*shape),
-                            bounces - 1,
-                        ) + color * intensity;
-                    } else {
-                        break;
-                    }
-                }
-            },
+        match shape.hit(ray, interval.clone()) {
+            Some(h) => {
+                interval.end = h.t;
+                hit = Some(h);
+            }
             None => continue,
         }
     }
 
-    Vector3::new(0.0, 0.0, 0.0)
+    hit
 }
 
 fn write_ppm(width: usize, height: usize, data: &[u8], mut writer: impl Write) -> io::Result<()> {

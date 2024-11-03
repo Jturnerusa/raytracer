@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 use crate::{
     hit::{Material, Record},
     Hit, Ray,
@@ -12,7 +14,7 @@ pub struct Sphere {
 }
 
 impl Hit for Sphere {
-    fn hit(&self, ray: Ray) -> Option<crate::hit::Record> {
+    fn hit(&self, ray: Ray, interval: Range<f64>) -> Option<crate::hit::Record> {
         let oc = self.center - ray.origin;
         let a = ray.direction.dot(&ray.direction);
         let h = ray.direction.dot(&oc);
@@ -20,18 +22,30 @@ impl Hit for Sphere {
         let d = (h * h) - (a * c);
 
         if d < 0.0 {
-            None
-        } else {
-            let root = (h - d.sqrt()) / a;
-            let point = ray.at(root);
-            let normal = (point - self.center) / self.radius;
-            Some(Record {
-                point,
-                normal,
-                t: root,
-                front: ray.direction.dot(&normal) > 0.0,
-                material: self.material,
-            })
+            return None;
         }
+
+        let mut root = (h - d.sqrt()) / a;
+
+        if !interval.contains(&root) {
+            root = (h + d.sqrt()) / a;
+            if !interval.contains(&root) {
+                return None;
+            }
+        }
+
+        let point = ray.at(root);
+        let normal = (point - self.center) / self.radius;
+        Some(Record {
+            point,
+            normal: if ray.direction.dot(&normal) > 0.0 {
+                normal
+            } else {
+                -normal
+            },
+            t: root,
+            front: ray.direction.dot(&normal) > 0.0,
+            material: self.material,
+        })
     }
 }
